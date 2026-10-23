@@ -160,6 +160,52 @@ func TestStatusBar_DNDNoEndTimestamp(t *testing.T) {
 	}
 }
 
+func TestStatusBar_CustomStatusSegment(t *testing.T) {
+	m := New()
+	m.SetCustomStatus("Working from home", "🏠")
+	out := stripANSI(m.View(120))
+	if !strings.Contains(out, "🏠 Working from home") {
+		t.Errorf("expected '🏠 Working from home', got: %q", out)
+	}
+}
+
+func TestStatusBar_NoCustomStatus_NoSegment(t *testing.T) {
+	m := New()
+	// Default state — no SetCustomStatus call.
+	out := stripANSI(m.View(120))
+	if strings.Contains(out, "Working from home") || strings.Contains(out, "On vacation") {
+		t.Errorf("expected no custom-status segment when unset, got: %q", out)
+	}
+}
+
+func TestModel_SetCustomStatus_BumpsVersionOnChange(t *testing.T) {
+	m := New()
+	v0 := m.Version()
+	m.SetCustomStatus("On vacation", "🌴")
+	if m.Version() == v0 {
+		t.Fatal("SetCustomStatus must bump Version() on change")
+	}
+	v1 := m.Version()
+	m.SetCustomStatus("On vacation", "🌴") // same value
+	if m.Version() != v1 {
+		t.Fatal("SetCustomStatus with unchanged value must be a no-op")
+	}
+}
+
+func TestStatusBar_CustomStatusDoesNotBreakExactWidth(t *testing.T) {
+	m := New()
+	m.SetMode(testMode("NORMAL"))
+	m.SetChannel("general")
+	m.SetWorkspace("Acme")
+	m.SetCustomStatus("Working from home", "🏠")
+
+	for _, width := range []int{80, 120, 240} {
+		if got := lipgloss.Width(m.View(width)); got != width {
+			t.Errorf("View(%d) is %d columns wide, want %d", width, got, width)
+		}
+	}
+}
+
 func TestStatusBar_PresenceUnknown_NoSegment(t *testing.T) {
 	m := New()
 	// Default state — no SetStatus call. Status segment should not appear.

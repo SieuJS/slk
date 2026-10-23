@@ -32,6 +32,8 @@ type Model struct {
 	presence    string // "active", "away", or "" (unknown — segment hidden)
 	dndEnabled  bool
 	dndEndTS    time.Time // zero if not in DND
+	statusText  string    // profile status preset text (e.g. "Working from home"); "" hides the segment
+	statusEmoji string    // display glyph for statusText
 	syncing     bool      // true while a background cache-verify fetch is in flight
 	helpHint    string    // muted text rendered in the gap area; empty disables
 	commandLine string    // "" == inactive; otherwise the :prompt shown in place of channel/workspace
@@ -121,6 +123,17 @@ func (m *Model) SetStatus(presence string, dndEnabled bool, dndEndTS time.Time) 
 	m.presence = presence
 	m.dndEnabled = dndEnabled
 	m.dndEndTS = dndEndTS
+	m.dirty()
+}
+
+// SetCustomStatus updates the profile status preset segment (e.g.
+// "Working from home"). Empty text hides the segment.
+func (m *Model) SetCustomStatus(text, emoji string) {
+	if m.statusText == text && m.statusEmoji == emoji {
+		return
+	}
+	m.statusText = text
+	m.statusEmoji = emoji
 	m.dirty()
 }
 
@@ -257,6 +270,14 @@ func (m Model) View(width int) string {
 				Background(styles.SurfaceDark).
 				Bold(true).
 				Render(m.toast))
+	}
+
+	if m.statusText != "" {
+		rightParts = append(rightParts,
+			lipgloss.NewStyle().
+				Foreground(styles.Accent).
+				Background(styles.SurfaceDark).
+				Render(m.statusEmoji+" "+m.statusText))
 	}
 
 	// Presence + DND segment (hidden when presence is "" and not in DND)

@@ -50,6 +50,14 @@ type workspaceStatus struct {
 	Presence   string
 	DNDEnabled bool
 	DNDEndTS   time.Time
+
+	// StatusText/StatusEmoji are the profile status preset currently
+	// applied (e.g. "Working from home" / "🏠"). Independent of
+	// Presence/DND: picking Active/Away must not clear these, matching
+	// real Slack. StatusEmoji is a display glyph, not the Slack API
+	// shortcode (":house:") sent by cmd/slk's setStatus closure.
+	StatusText  string
+	StatusEmoji string
 }
 
 // presenceController owns presence/DND state caching + the custom
@@ -84,15 +92,25 @@ func (p *presenceController) Status(teamID string) (presence string, dndEnabled 
 	return st.Presence, st.DNDEnabled, st.DNDEndTS, true
 }
 
-// Set records the status for teamID and returns the resulting struct
-// so the caller (typically StatusChangeMsg arm) can push to the
-// statusbar without a second lookup.
+// CustomStatus returns teamID's cached profile status preset (text,
+// display emoji), or ("", "") when none is set or the team is unknown.
+func (p *presenceController) CustomStatus(teamID string) (text, emoji string) {
+	st := p.byTeam[teamID]
+	return st.StatusText, st.StatusEmoji
+}
+
+// Set records the presence/DND status for teamID and returns the
+// resulting struct so the caller (typically StatusChangeMsg arm) can
+// push to the statusbar without a second lookup. StatusChangeMsg
+// carries only presence/DND fields (it arrives on every reconnect and
+// on any presence/DND change, not just the status preset selection),
+// so the existing StatusText/StatusEmoji are preserved rather than
+// rebuilt from a zero-value struct.
 func (p *presenceController) Set(teamID string, presence string, dndEnabled bool, dndEnd time.Time) workspaceStatus {
-	st := workspaceStatus{
-		Presence:   presence,
-		DNDEnabled: dndEnabled,
-		DNDEndTS:   dndEnd,
-	}
+	st := p.byTeam[teamID]
+	st.Presence = presence
+	st.DNDEnabled = dndEnabled
+	st.DNDEndTS = dndEnd
 	p.byTeam[teamID] = st
 	return st
 }
@@ -125,6 +143,12 @@ func (p *presenceController) Apply(teamID string, action core.PresenceAction, sn
 	case presencemenu.ActionEndDND:
 		st.DNDEnabled = false
 		st.DNDEndTS = time.Time{}
+	case presencemenu.ActionSetWFH:
+		st.StatusText, st.StatusEmoji = "Working from home", "🏠"
+	case presencemenu.ActionSetVacation:
+		st.StatusText, st.StatusEmoji = "On vacation", "🌴"
+	case presencemenu.ActionClearStatus:
+		st.StatusText, st.StatusEmoji = "", ""
 	}
 	p.byTeam[teamID] = st
 	return st

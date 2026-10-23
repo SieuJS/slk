@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -11,9 +12,10 @@ import (
 )
 
 // presenceMenuAllRows is the unfiltered row count for a menu opened
-// without DND active: Active, Away, six fixed snoozes, "until tomorrow
-// morning", and "Snooze custom...".
-const presenceMenuAllRows = 10
+// without DND active and no custom status set: Active, Away, Working
+// from home, On vacation, six fixed snoozes, "until tomorrow morning",
+// and "Snooze custom...".
+const presenceMenuAllRows = 12
 
 // openPresenceMenu mirrors the production open path
 // (mode_normal.go:228-231) for a workspace with no DND, and records
@@ -248,6 +250,104 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 			},
 		},
 		{
+			name: "enter on Working from home sets custom status and shows it in the status bar",
+			opts: opts,
+			setup: func(t *testing.T, a *App) {
+				open(t, a)
+				typePresenceQuery(t, a, "home", 1)
+			},
+			key:      keyCode(tea.KeyEnter),
+			wantMode: ModeNormal,
+			assert: func(t *testing.T, a *App, _ tea.Cmd) {
+				text, _ := a.presence.CustomStatus("T1")
+				if text != "Working from home" {
+					t.Errorf("CustomStatus = %q, want \"Working from home\"", text)
+				}
+				if !strings.Contains(a.statusbar.View(120), "Working from home") {
+					t.Error("status bar does not show the new custom status")
+				}
+				if len(calls) != 1 || calls[0].action != presencemenu.ActionSetWFH {
+					t.Errorf("setStatusFn calls = %+v, want one ActionSetWFH", calls)
+				}
+			},
+		},
+		{
+			name: "enter on On vacation sets custom status",
+			opts: opts,
+			setup: func(t *testing.T, a *App) {
+				open(t, a)
+				typePresenceQuery(t, a, "vacation", 1)
+			},
+			key:      keyCode(tea.KeyEnter),
+			wantMode: ModeNormal,
+			assert: func(t *testing.T, a *App, _ tea.Cmd) {
+				text, _ := a.presence.CustomStatus("T1")
+				if text != "On vacation" {
+					t.Errorf("CustomStatus = %q, want \"On vacation\"", text)
+				}
+				if len(calls) != 1 || calls[0].action != presencemenu.ActionSetVacation {
+					t.Errorf("setStatusFn calls = %+v, want one ActionSetVacation", calls)
+				}
+			},
+		},
+		{
+			// Pins the invariant that presence and custom status are
+			// independent in real Slack: picking Active must not wipe
+			// an existing custom status. An earlier draft of this
+			// feature got this backwards.
+			name: "enter on Active does not clear an existing custom status",
+			opts: opts,
+			setup: func(t *testing.T, a *App) {
+				open(t, a)
+				a.presence.Apply("T1", presencemenu.ActionSetWFH, 0)
+				a.statusbar.SetCustomStatus(a.presence.CustomStatus("T1"))
+				// Re-open so the row-count/cursor state reflects the
+				// status just set (buildItems now has the Clear-status
+				// row too).
+				pres, dndEnabled, dndEnd, _ := a.presence.Status("T1")
+				a.presenceMenu.OpenWith("ws", pres, dndEnabled, dndEnd)
+			},
+			key:      keyCode(tea.KeyEnter),
+			wantMode: ModeNormal,
+			assert: func(t *testing.T, a *App, _ tea.Cmd) {
+				pres, _, _, _ := a.presence.Status("T1")
+				if pres != "active" {
+					t.Errorf("presence = %q, want \"active\"", pres)
+				}
+				text, _ := a.presence.CustomStatus("T1")
+				if text != "Working from home" {
+					t.Errorf("CustomStatus = %q, want it preserved as \"Working from home\"", text)
+				}
+			},
+		},
+		{
+			name: "enter on Clear status clears the custom status",
+			opts: opts,
+			setup: func(t *testing.T, a *App) {
+				open(t, a)
+				a.presence.Apply("T1", presencemenu.ActionSetVacation, 0)
+				a.statusbar.SetCustomStatus(a.presence.CustomStatus("T1"))
+				pres, dndEnabled, dndEnd, _ := a.presence.Status("T1")
+				a.presenceMenu.SetCurrentCustomStatus("On vacation")
+				a.presenceMenu.OpenWith("ws", pres, dndEnabled, dndEnd)
+				if got := modalRows(&a.presenceMenu); got != presenceMenuAllRows+1 {
+					t.Fatalf("precondition: %d rows, want %d (Clear-status row missing)", got, presenceMenuAllRows+1)
+				}
+				typePresenceQuery(t, a, "clear", 1)
+			},
+			key:      keyCode(tea.KeyEnter),
+			wantMode: ModeNormal,
+			assert: func(t *testing.T, a *App, _ tea.Cmd) {
+				text, emoji := a.presence.CustomStatus("T1")
+				if text != "" || emoji != "" {
+					t.Errorf("CustomStatus = (%q, %q), want cleared", text, emoji)
+				}
+				if len(calls) != 1 || calls[0].action != presencemenu.ActionClearStatus {
+					t.Errorf("setStatusFn calls = %+v, want one ActionClearStatus", calls)
+				}
+			},
+		},
+		{
 			name: "enter with no matching row is a no-op",
 			opts: opts,
 			setup: func(t *testing.T, a *App) {
@@ -461,10 +561,11 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 			key:      keyPress('a'),
 			wantMode: ModePresenceMenu,
 			assert: func(t *testing.T, a *App, _ tea.Cmd) {
-				// "Active" and "Away" prefix-match; no snooze label
+				// "Active" and "Away" prefix-match; "On vacation"
+				// substring-matches via "vacation"; no snooze label
 				// contains an "a".
-				if got := modalRows(&a.presenceMenu); got != 2 {
-					t.Errorf("rows = %d, want 2 after filtering on \"a\"", got)
+				if got := modalRows(&a.presenceMenu); got != 3 {
+					t.Errorf("rows = %d, want 3 after filtering on \"a\"", got)
 				}
 			},
 		},
@@ -473,7 +574,7 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 			opts: opts,
 			setup: func(t *testing.T, a *App) {
 				open(t, a)
-				typePresenceQuery(t, a, "a", 2)
+				typePresenceQuery(t, a, "a", 3)
 			},
 			key:      keyCode(tea.KeyBackspace),
 			wantMode: ModePresenceMenu,
@@ -523,6 +624,27 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 			wantMode: ModeNormal,
 		},
 	})
+}
+
+// TestPresenceMenuKeyOpensWithCurrentCustomStatus exercises the real
+// ctrl+s path through handleNormalMode (mode_normal.go), not the
+// openPresenceMenu test helper that mirrors it — pinning that the
+// production code looks up the active workspace's custom status and
+// passes it to presenceMenu before opening, so the Clear-status row and
+// checkmark reflect reality on open, not just when a test calls
+// OpenWith directly.
+func TestPresenceMenuKeyOpensWithCurrentCustomStatus(t *testing.T) {
+	a := newTestApp(t, withActiveTeam("T1"))
+	a.presence.Apply("T1", presencemenu.ActionSetWFH, 0)
+
+	_ = dispatchModeKey(a, keyMod('s', tea.ModCtrl))
+
+	if !a.presenceMenu.IsVisible() {
+		t.Fatal("ctrl+s did not open the presence menu")
+	}
+	if got := modalRows(&a.presenceMenu); got != presenceMenuAllRows+1 {
+		t.Errorf("rows = %d, want %d (Clear-status row missing: mode_normal.go must pass the current custom status to OpenWith)", got, presenceMenuAllRows+1)
+	}
 }
 
 // assertCommitsTo presses enter and asserts the menu committed the

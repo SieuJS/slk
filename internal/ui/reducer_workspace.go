@@ -241,6 +241,7 @@ func reduceWorkspaceReady(a *App, m WorkspaceReadyMsg) tea.Cmd {
 		a.backJump = nil
 		pres, dndEnabled, dndEnd, _ := a.presence.Status(a.activeTeamID)
 		a.statusbar.SetStatus(pres, dndEnabled, dndEnd)
+		a.statusbar.SetCustomStatus(a.presence.CustomStatus(a.activeTeamID))
 		a.workspaceRail.SelectByID(m.TeamID)
 		if len(m.Channels) > 0 {
 			// Restore the last-visited channel across restarts (persisted in
@@ -396,6 +397,7 @@ func reduceWorkspaceSwitched(a *App, m WorkspaceSwitchedMsg) tea.Cmd {
 	a.backJump = nil
 	pres, dndEnabled, dndEnd, _ := a.presence.Status(a.activeTeamID)
 	a.statusbar.SetStatus(pres, dndEnabled, dndEnd)
+	a.statusbar.SetCustomStatus(a.presence.CustomStatus(a.activeTeamID))
 	// Apply per-workspace theme. Must run on Update goroutine so
 	// applyTheme's cache invalidations and style refreshes take
 	// effect on the next render.

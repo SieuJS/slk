@@ -9,6 +9,7 @@ import "github.com/gammons/slk/internal/core"
 func (a *App) applyPresenceAction(action core.PresenceAction, snoozeMinutes int) {
 	st := a.presence.Apply(a.activeTeamID, action, snoozeMinutes)
 	a.statusbar.SetStatus(st.Presence, st.DNDEnabled, st.DNDEndTS)
+	a.statusbar.SetCustomStatus(st.StatusText, st.StatusEmoji)
 	if a.presenceSvc != nil {
 		a.presenceSvc.SetStatus(action, snoozeMinutes)
 	}
