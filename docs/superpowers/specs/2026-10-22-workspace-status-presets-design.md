@@ -135,3 +135,23 @@ PR #360 found:
 - That the `Ctrl+S` menu can now exceed a short terminal's height with
   no scrolling — a pre-existing limitation of the menu, not new to this
   change, just easier to hit. Left as a follow-up, not fixed here.
+
+A follow-up local review (`codex-batch-review`, scoped to just the
+emoji-only/truncation fix commit) caught three more real issues in that
+fix itself, all fixed with regression tests:
+
+- The truncation budget math double-counted a separator when the
+  status segment landed between two other segments (e.g. an unread
+  badge before it, the connection indicator after it) — it always
+  needs exactly one *more* separator than the other segments' own
+  joined width already accounts for, not one per side.
+- The truncation loop hand-rolled rune-by-rune width summation instead
+  of reusing `muesli/reflow/truncate.StringWithTail` — already the
+  established width-aware truncator elsewhere in this codebase
+  (`internal/ui/presencemenu`, `internal/ui/thread/breadcrumb.go`,
+  and a dozen other files). Rune-by-rune summation can mismeasure
+  combined grapheme clusters (variation selectors, ZWJ sequences) in
+  status text and let a segment exceed its budget.
+- When the budget allowed the emoji but not even one character of
+  text, the result was a bare "emoji …" with nothing actually
+  truncated — now falls back to emoji alone instead.

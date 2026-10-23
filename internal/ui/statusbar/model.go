@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/gammons/slk/internal/ui/styles"
+	"github.com/muesli/reflow/truncate"
 )
 
 // ConnectionState represents the WebSocket connection status.
@@ -338,22 +339,24 @@ func (m Model) View(width int) string {
 	const rightGutter = 1
 
 	// Size the custom-status segment to whatever room is left after
-	// every other segment and the two separators its insertion would
-	// add. Slack allows up to 100 characters of status text — unlike
-	// this feature's own two short presets, a status set from the real
-	// Slack client has no length slk controls, so it must degrade
-	// (truncate, then emoji-only, then dropped) rather than push the
-	// bar over width.
+	// every other segment. Slack allows up to 100 characters of status
+	// text — unlike this feature's own two short presets, a status set
+	// from the real Slack client has no length slk controls, so it
+	// must degrade (truncate, then emoji-only, then dropped) rather
+	// than push the bar over width.
 	if m.statusText != "" || m.statusEmoji != "" {
+		// otherWidth already counts len(rightParts)-1 separators (the
+		// ones between the existing parts). Inserting one more part —
+		// anywhere among them, not just at an end — always turns that
+		// into len(rightParts) separators total: exactly one more than
+		// otherWidth already has, never two, regardless of where it
+		// lands.
 		otherWidth := lipgloss.Width(joinRightParts(rightParts, sep))
-		seps := 0
-		if statusInsertIdx > 0 {
-			seps++
+		extraSep := 0
+		if len(rightParts) > 0 {
+			extraSep = 1
 		}
-		if statusInsertIdx < len(rightParts) {
-			seps++
-		}
-		budget := width - rightGutter - lipgloss.Width(left) - otherWidth - lipgloss.Width(trailing) - seps*lipgloss.Width(sep)
+		budget := width - rightGutter - lipgloss.Width(left) - otherWidth - lipgloss.Width(trailing) - extraSep*lipgloss.Width(sep)
 		if seg := fitStatusSegment(m.statusEmoji, m.statusText, budget); seg != "" {
 			rightParts = append(rightParts[:statusInsertIdx:statusInsertIdx],
 				append([]string{seg}, rightParts[statusInsertIdx:]...)...)
@@ -428,33 +431,36 @@ func fitStatusSegment(emoji, text string, maxWidth int) string {
 	if lipgloss.Width(full) <= maxWidth {
 		return style.Render(full)
 	}
-	if text == "" {
-		// Emoji alone already doesn't fit; nothing smaller to try.
-		return ""
-	}
-	prefix := emoji
-	if prefix != "" {
-		prefix += " "
-	}
-	const ellipsis = "…"
-	budget := maxWidth - lipgloss.Width(prefix) - lipgloss.Width(ellipsis)
-	if budget <= 0 {
+	emojiAlone := func() string {
 		if emoji != "" && lipgloss.Width(emoji) <= maxWidth {
 			return style.Render(emoji)
 		}
 		return ""
 	}
-	var b strings.Builder
-	w := 0
-	for _, r := range text {
-		rw := lipgloss.Width(string(r))
-		if w+rw > budget {
-			break
-		}
-		b.WriteRune(r)
-		w += rw
+	if text == "" {
+		return emojiAlone()
 	}
-	return style.Render(prefix + b.String() + ellipsis)
+	prefix := emoji
+	if prefix != "" {
+		prefix += " "
+	}
+	prefixWidth := lipgloss.Width(prefix)
+	if prefixWidth >= maxWidth {
+		return emojiAlone()
+	}
+	// truncate.StringWithTail is the same width-aware truncator already
+	// used elsewhere in this codebase (internal/ui/presencemenu,
+	// internal/ui/thread/breadcrumb.go, ...) — reused here rather than
+	// hand-rolling rune-by-rune width summation, which can mismeasure
+	// combined grapheme clusters (variation selectors, ZWJ sequences)
+	// in the status text and let a segment exceed maxWidth.
+	truncated := truncate.StringWithTail(text, uint(maxWidth-prefixWidth), "…")
+	if truncated == "" || truncated == "…" {
+		// Not even one character of text fit: an ellipsis with nothing
+		// preceding it reads as broken, so fall back to emoji alone.
+		return emojiAlone()
+	}
+	return style.Render(prefix + truncated)
 }
 
 // formatDND renders the DND segment with an optional countdown to the
