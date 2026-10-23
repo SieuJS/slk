@@ -296,7 +296,7 @@ func handleNormalMode(a *App, msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, a.keys.PresenceMenu):
 		header := a.workspaceNameForActive()
 		pres, dndEnabled, dndEnd, _ := a.presence.Status(a.activeTeamID)
-		statusText, _ := a.presence.CustomStatus(a.activeTeamID)
+		statusText, _ := a.presence.CustomStatus(a.currentUserID)
 		a.presenceMenu.SetCurrentCustomStatus(statusText)
 		a.presenceMenu.OpenWith(header, pres, dndEnabled, dndEnd)
 		a.SetMode(ModePresenceMenu)

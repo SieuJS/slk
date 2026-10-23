@@ -250,7 +250,12 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 			},
 		},
 		{
-			name: "enter on Working from home sets custom status and shows it in the status bar",
+			// Custom status is no longer optimistic (round 3 of
+			// review): Apply is a no-op for WFH/Vacation/Clear, so
+			// selecting a row only forwards the action; the display
+			// changes once the real UserStatusChangeMsg echo arrives
+			// (see TestSelfStatusChangeRefreshesStatusBar).
+			name: "enter on Working from home forwards the action without an optimistic display",
 			opts: opts,
 			setup: func(t *testing.T, a *App) {
 				open(t, a)
@@ -259,20 +264,16 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 			key:      keyCode(tea.KeyEnter),
 			wantMode: ModeNormal,
 			assert: func(t *testing.T, a *App, _ tea.Cmd) {
-				text, _ := a.presence.CustomStatus("T1")
-				if text != "Working from home" {
-					t.Errorf("CustomStatus = %q, want \"Working from home\"", text)
-				}
-				if !strings.Contains(a.statusbar.View(120), "Working from home") {
-					t.Error("status bar does not show the new custom status")
-				}
 				if len(calls) != 1 || calls[0].action != presencemenu.ActionSetWFH {
 					t.Errorf("setStatusFn calls = %+v, want one ActionSetWFH", calls)
+				}
+				if strings.Contains(a.statusbar.View(120), "Working from home") {
+					t.Error("status bar must not show the status before the real event confirms it")
 				}
 			},
 		},
 		{
-			name: "enter on On vacation sets custom status",
+			name: "enter on On vacation forwards the action without an optimistic display",
 			opts: opts,
 			setup: func(t *testing.T, a *App) {
 				open(t, a)
@@ -281,10 +282,6 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 			key:      keyCode(tea.KeyEnter),
 			wantMode: ModeNormal,
 			assert: func(t *testing.T, a *App, _ tea.Cmd) {
-				text, _ := a.presence.CustomStatus("T1")
-				if text != "On vacation" {
-					t.Errorf("CustomStatus = %q, want \"On vacation\"", text)
-				}
 				if len(calls) != 1 || calls[0].action != presencemenu.ActionSetVacation {
 					t.Errorf("setStatusFn calls = %+v, want one ActionSetVacation", calls)
 				}
@@ -294,16 +291,20 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 			// Pins the invariant that presence and custom status are
 			// independent in real Slack: picking Active must not wipe
 			// an existing custom status. An earlier draft of this
-			// feature got this backwards.
+			// feature got this backwards. The status is seeded the way
+			// it actually arrives in production — a
+			// UserStatusChangeMsg — not via Apply, which no longer
+			// writes custom status at all.
 			name: "enter on Active does not clear an existing custom status",
 			opts: opts,
 			setup: func(t *testing.T, a *App) {
+				a.currentUserID = "U1"
 				open(t, a)
-				a.presence.Apply("T1", presencemenu.ActionSetWFH, 0)
-				a.statusbar.SetCustomStatus(a.presence.CustomStatus("T1"))
+				_, _ = a.Update(UserStatusChangeMsg{UserID: "U1", Emoji: ":house:", Text: "Working from home"})
 				// Re-open so the row-count/cursor state reflects the
 				// status just set (buildItems now has the Clear-status
 				// row too).
+				a.presenceMenu.SetCurrentCustomStatus("Working from home")
 				pres, dndEnabled, dndEnd, _ := a.presence.Status("T1")
 				a.presenceMenu.OpenWith("ws", pres, dndEnabled, dndEnd)
 			},
@@ -314,19 +315,19 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 				if pres != "active" {
 					t.Errorf("presence = %q, want \"active\"", pres)
 				}
-				text, _ := a.presence.CustomStatus("T1")
+				text, _ := a.presence.CustomStatus("U1")
 				if text != "Working from home" {
 					t.Errorf("CustomStatus = %q, want it preserved as \"Working from home\"", text)
 				}
 			},
 		},
 		{
-			name: "enter on Clear status clears the custom status",
+			name: "enter on Clear status forwards the action",
 			opts: opts,
 			setup: func(t *testing.T, a *App) {
+				a.currentUserID = "U1"
 				open(t, a)
-				a.presence.Apply("T1", presencemenu.ActionSetVacation, 0)
-				a.statusbar.SetCustomStatus(a.presence.CustomStatus("T1"))
+				_, _ = a.Update(UserStatusChangeMsg{UserID: "U1", Emoji: ":palm_tree:", Text: "On vacation"})
 				pres, dndEnabled, dndEnd, _ := a.presence.Status("T1")
 				a.presenceMenu.SetCurrentCustomStatus("On vacation")
 				a.presenceMenu.OpenWith("ws", pres, dndEnabled, dndEnd)
@@ -338,12 +339,15 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 			key:      keyCode(tea.KeyEnter),
 			wantMode: ModeNormal,
 			assert: func(t *testing.T, a *App, _ tea.Cmd) {
-				text, emoji := a.presence.CustomStatus("T1")
-				if text != "" || emoji != "" {
-					t.Errorf("CustomStatus = (%q, %q), want cleared", text, emoji)
-				}
 				if len(calls) != 1 || calls[0].action != presencemenu.ActionClearStatus {
 					t.Errorf("setStatusFn calls = %+v, want one ActionClearStatus", calls)
+				}
+				// Clearing is also event-driven: the cache still shows
+				// the previous status until the real event confirms
+				// the clear.
+				text, _ := a.presence.CustomStatus("U1")
+				if text != "On vacation" {
+					t.Errorf("CustomStatus = %q, want it unchanged until the echo arrives", text)
 				}
 			},
 		},
@@ -635,7 +639,8 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 // OpenWith directly.
 func TestPresenceMenuKeyOpensWithCurrentCustomStatus(t *testing.T) {
 	a := newTestApp(t, withActiveTeam("T1"))
-	a.presence.Apply("T1", presencemenu.ActionSetWFH, 0)
+	a.currentUserID = "U1"
+	_, _ = a.Update(UserStatusChangeMsg{UserID: "U1", Emoji: ":house:", Text: "Working from home"})
 
 	_ = dispatchModeKey(a, keyMod('s', tea.ModCtrl))
 

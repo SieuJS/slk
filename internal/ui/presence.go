@@ -46,18 +46,13 @@ func hasDeadline(st peerstatus.Status) bool {
 
 // workspaceStatus caches the latest StatusChangeMsg per team so the
 // status bar can refresh on workspace switch without round-tripping.
+//
+// Custom profile status (as opposed to presence/DND) is deliberately
+// NOT cached here — see CustomStatus below for why.
 type workspaceStatus struct {
 	Presence   string
 	DNDEnabled bool
 	DNDEndTS   time.Time
-
-	// StatusText/StatusEmoji are the profile status preset currently
-	// applied (e.g. "Working from home" / "🏠"). Independent of
-	// Presence/DND: picking Active/Away must not clear these, matching
-	// real Slack. StatusEmoji is a display glyph, not the Slack API
-	// shortcode (":house:") sent by cmd/slk's setStatus closure.
-	StatusText  string
-	StatusEmoji string
 }
 
 // presenceController owns presence/DND state caching + the custom
@@ -92,11 +87,27 @@ func (p *presenceController) Status(teamID string) (presence string, dndEnabled 
 	return st.Presence, st.DNDEnabled, st.DNDEndTS, true
 }
 
-// CustomStatus returns teamID's cached profile status preset (text,
-// display emoji), or ("", "") when none is set or the team is unknown.
-func (p *presenceController) CustomStatus(teamID string) (text, emoji string) {
-	st := p.byTeam[teamID]
-	return st.StatusText, st.StatusEmoji
+// CustomStatus returns userID's custom profile status (text, display
+// glyph) if set and unexpired, or ("", "") otherwise.
+//
+// This reads the SAME peers store used for everyone else's custom
+// status, including when userID is the current user: Slack's
+// user_change/user_status_changed events carry no self-filter, so the
+// authenticated user's own status flows through UserStatusChangeMsg
+// and SetPeers exactly like a teammate's does. An earlier draft of
+// this cached "your own" status separately (workspaceStatus.StatusText
+// /StatusEmoji, written only by Apply), and review caught that this
+// meant the status vanished on restart, never reflected an edit made
+// from the real Slack client, and had no expiry — all three come for
+// free by sharing this store instead, since it already has the startup
+// seed (SetPeers), live updates and the peerStatusTickMsg expiry tick.
+func (p *presenceController) CustomStatus(userID string) (text, emoji string) {
+	st, ok := p.peers[userID]
+	now := time.Now()
+	if !ok || !st.HasStatus(now) {
+		return "", ""
+	}
+	return st.Text, st.StatusGlyph(now)
 }
 
 // Set records the presence/DND status for teamID and returns the
@@ -126,10 +137,17 @@ func (p *presenceController) ClearDNDFor(teamID string) workspaceStatus {
 	return st
 }
 
-// Apply mutates teamID's cached status based on the chosen presencemenu
-// action. SetActive/SetAway touch only Presence; Snooze sets DND fields
-// and leaves Presence alone; EndDND clears DND fields and leaves
-// Presence alone. Returns the resulting struct.
+// Apply mutates teamID's cached presence/DND based on the chosen
+// presencemenu action. SetActive/SetAway touch only Presence; Snooze
+// sets DND fields and leaves Presence alone; EndDND clears DND fields
+// and leaves Presence alone. ActionSetWFH/ActionSetVacation/
+// ActionClearStatus are deliberately no-ops here: they carry no local
+// cache write at all (see CustomStatus) — applyPresenceAction forwards
+// them to presenceSvc, which makes the real Slack API call, and the
+// resulting UserStatusChangeMsg echo is what actually updates the
+// display. This also means a failed API call never shows as applied:
+// nothing was shown optimistically to begin with. Returns the
+// resulting struct.
 func (p *presenceController) Apply(teamID string, action core.PresenceAction, snoozeMinutes int) workspaceStatus {
 	st := p.byTeam[teamID]
 	switch action {
@@ -143,12 +161,6 @@ func (p *presenceController) Apply(teamID string, action core.PresenceAction, sn
 	case presencemenu.ActionEndDND:
 		st.DNDEnabled = false
 		st.DNDEndTS = time.Time{}
-	case presencemenu.ActionSetWFH:
-		st.StatusText, st.StatusEmoji = "Working from home", "🏠"
-	case presencemenu.ActionSetVacation:
-		st.StatusText, st.StatusEmoji = "On vacation", "🌴"
-	case presencemenu.ActionClearStatus:
-		st.StatusText, st.StatusEmoji = "", ""
 	}
 	p.byTeam[teamID] = st
 	return st
@@ -304,6 +316,9 @@ func (p *presenceController) applyPeer(a *App, userID string, st peerstatus.Stat
 	}
 	a.threadPanel.PatchUserStatus(userID, st)
 	p.pushDMStatus(a, userID, time.Now())
+	if userID == a.currentUserID {
+		a.statusbar.SetCustomStatus(p.CustomStatus(userID))
+	}
 	return p.claimPeerTick(st)
 }
 
@@ -383,6 +398,9 @@ func (p *presenceController) expirePeers(a *App, now time.Time) tea.Cmd {
 			st = st.Clear(now)
 			p.peers[uid] = st
 			p.pushDMStatus(a, uid, now)
+			if uid == a.currentUserID {
+				a.statusbar.SetCustomStatus(p.CustomStatus(uid))
+			}
 		}
 		if hasDeadline(st) {
 			pending = true
