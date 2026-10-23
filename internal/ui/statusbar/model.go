@@ -272,13 +272,11 @@ func (m Model) View(width int) string {
 				Render(m.toast))
 	}
 
-	if m.statusText != "" || m.statusEmoji != "" {
-		rightParts = append(rightParts,
-			lipgloss.NewStyle().
-				Foreground(styles.Accent).
-				Background(styles.SurfaceDark).
-				Render(strings.TrimSpace(m.statusEmoji+" "+m.statusText)))
-	}
+	// The custom-status segment is sized to fit below, once the width
+	// left over by every other segment is known; statusInsertIdx marks
+	// where it belongs in the visual order (between toast and
+	// presence/DND) without needing those segments built around it.
+	statusInsertIdx := len(rightParts)
 
 	// Presence + DND segment (hidden when presence is "" and not in DND)
 	if m.dndEnabled {
@@ -331,15 +329,6 @@ func (m Model) View(width int) string {
 	sep := lipgloss.NewStyle().Background(styles.SurfaceDark).Render(" ")
 	trailing := lipgloss.NewStyle().Background(styles.SurfaceDark).Render("  ")
 
-	rightContent := ""
-	for i, p := range rightParts {
-		if i > 0 {
-			rightContent += sep
-		}
-		rightContent += p
-	}
-	rightContent += trailing // trailing padding (extra space for unicode width variance)
-
 	// Right-align so the rightmost segment ends at column (width-1),
 	// matching the inner right edge of the message-pane / thread-pane
 	// compose box (which ends 1 column before the screen edge -- the
@@ -347,6 +336,32 @@ func (m Model) View(width int) string {
 	// content rows above). Without this gap, the connection indicator
 	// overhangs visually past the compose box.
 	const rightGutter = 1
+
+	// Size the custom-status segment to whatever room is left after
+	// every other segment and the two separators its insertion would
+	// add. Slack allows up to 100 characters of status text — unlike
+	// this feature's own two short presets, a status set from the real
+	// Slack client has no length slk controls, so it must degrade
+	// (truncate, then emoji-only, then dropped) rather than push the
+	// bar over width.
+	if m.statusText != "" || m.statusEmoji != "" {
+		otherWidth := lipgloss.Width(joinRightParts(rightParts, sep))
+		seps := 0
+		if statusInsertIdx > 0 {
+			seps++
+		}
+		if statusInsertIdx < len(rightParts) {
+			seps++
+		}
+		budget := width - rightGutter - lipgloss.Width(left) - otherWidth - lipgloss.Width(trailing) - seps*lipgloss.Width(sep)
+		if seg := fitStatusSegment(m.statusEmoji, m.statusText, budget); seg != "" {
+			rightParts = append(rightParts[:statusInsertIdx:statusInsertIdx],
+				append([]string{seg}, rightParts[statusInsertIdx:]...)...)
+		}
+	}
+
+	rightContent := joinRightParts(rightParts, sep) + trailing // trailing padding (extra space for unicode width variance)
+
 	gap := width - rightGutter - lipgloss.Width(left) - lipgloss.Width(rightContent)
 	if gap < 0 {
 		gap = 0
@@ -381,6 +396,65 @@ func (m Model) View(width int) string {
 	rightPad := spacer.Render(strings.Repeat(" ", rightGutter))
 
 	return lipgloss.JoinHorizontal(lipgloss.Center, left, filler, rightContent, rightPad)
+}
+
+// joinRightParts joins the right-side segments with sep between each,
+// matching how they're visually separated in the rendered bar.
+func joinRightParts(parts []string, sep string) string {
+	s := ""
+	for i, p := range parts {
+		if i > 0 {
+			s += sep
+		}
+		s += p
+	}
+	return s
+}
+
+// fitStatusSegment returns the styled custom-status segment sized to
+// fit within maxWidth columns, degrading in steps: the full "emoji
+// text", then emoji plus as much text as fits with a trailing
+// ellipsis, then emoji alone, then "" if nothing fits. Needed because
+// Slack allows up to 100 characters of status text — far longer than
+// this feature's own two short presets — so a status set from the
+// real Slack client must not be allowed to push the status bar over
+// its exact-width budget.
+func fitStatusSegment(emoji, text string, maxWidth int) string {
+	style := lipgloss.NewStyle().Foreground(styles.Accent).Background(styles.SurfaceDark)
+	full := strings.TrimSpace(emoji + " " + text)
+	if full == "" || maxWidth <= 0 {
+		return ""
+	}
+	if lipgloss.Width(full) <= maxWidth {
+		return style.Render(full)
+	}
+	if text == "" {
+		// Emoji alone already doesn't fit; nothing smaller to try.
+		return ""
+	}
+	prefix := emoji
+	if prefix != "" {
+		prefix += " "
+	}
+	const ellipsis = "…"
+	budget := maxWidth - lipgloss.Width(prefix) - lipgloss.Width(ellipsis)
+	if budget <= 0 {
+		if emoji != "" && lipgloss.Width(emoji) <= maxWidth {
+			return style.Render(emoji)
+		}
+		return ""
+	}
+	var b strings.Builder
+	w := 0
+	for _, r := range text {
+		rw := lipgloss.Width(string(r))
+		if w+rw > budget {
+			break
+		}
+		b.WriteRune(r)
+		w += rw
+	}
+	return style.Render(prefix + b.String() + ellipsis)
 }
 
 // formatDND renders the DND segment with an optional countdown to the

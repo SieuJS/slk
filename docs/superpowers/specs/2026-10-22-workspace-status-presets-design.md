@@ -114,12 +114,24 @@ peers.
 
 ## Review history
 
-Two rounds of independent review (an automated pass plus a maintainer
-review) on PR #360 found: the architecture issue above (fixed by this
-redesign); the optimistic-display-on-failure issue (fixed as a side
-effect of the same redesign); a status-bar width-overflow risk for long
-segments (not reachable by the two short fixed presets shipped here,
-left as a known latent gap in the general right-segment mechanism); and
-that the `Ctrl+S` menu can now exceed a short terminal's height with no
-scrolling (a pre-existing limitation of the menu, not new to this
-change, just easier to hit).
+Three rounds of automated review (Greptile, plus a bot posting as
+@gammons — no human maintainer review yet as of this writing) on
+PR #360 found:
+
+- The self-status architecture issue above (fixed by this redesign).
+- The optimistic-display-on-failure issue (fixed as a side effect of
+  the same redesign).
+- Emoji-only statuses (no text) were dropped everywhere — the status
+  bar and the menu's Clear-status row both gated visibility on status
+  text alone, discarding the emoji. Fixed: visibility now checks
+  text-or-emoji.
+- Status-bar width overflow for long statuses. The redesign above made
+  this reachable: `slk` now shows *any* status set from the real Slack
+  client, not just this feature's own two short fixed presets, and
+  Slack allows up to 100 characters. Fixed: the custom-status segment
+  now degrades (full text → emoji + truncated text + ellipsis → emoji
+  alone → dropped) to stay within the status bar's exact-width budget,
+  rather than assuming a fixed short length.
+- That the `Ctrl+S` menu can now exceed a short terminal's height with
+  no scrolling — a pre-existing limitation of the menu, not new to this
+  change, just easier to hit. Left as a follow-up, not fixed here.

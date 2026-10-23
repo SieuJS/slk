@@ -205,6 +205,52 @@ func TestModel_SetCustomStatus_BumpsVersionOnChange(t *testing.T) {
 	}
 }
 
+// TestStatusBar_LongCustomStatusTruncatesToFitWidth pins a real bug
+// found in review: the architecture now shows ANY status set from the
+// real Slack client, not just the two short fixed presets this PR
+// shipped — and Slack allows up to 100 characters of status text. A
+// long status must not push the exact-width invariant over budget or
+// hide the connection indicator; it must be cut to fit.
+func TestStatusBar_LongCustomStatusTruncatesToFitWidth(t *testing.T) {
+	m := New()
+	m.SetMode(testMode("NORMAL"))
+	m.SetChannel("general")
+	m.SetWorkspace("Acme")
+	m.SetConnectionState(StateConnected)
+	m.SetCustomStatus(strings.Repeat("a very long status indeed ", 5), "🏠")
+
+	const width = 60
+	view := m.View(width)
+	if got := lipgloss.Width(view); got != width {
+		t.Fatalf("View(%d) is %d columns wide, want %d", width, got, width)
+	}
+	if !strings.Contains(stripANSI(view), "Connected") {
+		t.Errorf("connection indicator must still render, got: %q", stripANSI(view))
+	}
+}
+
+// TestStatusBar_StatusSegmentDropsWhenNoRoom: at an extremely narrow
+// width even an emoji-only segment may not fit; the bar must still
+// hold its exact width and keep the connection indicator rather than
+// silently exceeding width.
+func TestStatusBar_StatusSegmentDropsWhenNoRoom(t *testing.T) {
+	m := New()
+	m.SetMode(testMode("NORMAL"))
+	m.SetChannel("general")
+	m.SetWorkspace("Acme")
+	m.SetConnectionState(StateConnected)
+	m.SetCustomStatus("Working from home", "🏠")
+
+	const width = 44 // exactly fits mode+channel+workspace+connection with no room for any status
+	view := m.View(width)
+	if got := lipgloss.Width(view); got != width {
+		t.Fatalf("View(%d) is %d columns wide, want %d", width, got, width)
+	}
+	if !strings.Contains(stripANSI(view), "Connected") {
+		t.Errorf("connection indicator must still render even when the status segment is dropped, got: %q", stripANSI(view))
+	}
+}
+
 func TestStatusBar_CustomStatusDoesNotBreakExactWidth(t *testing.T) {
 	m := New()
 	m.SetMode(testMode("NORMAL"))
