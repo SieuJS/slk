@@ -73,7 +73,7 @@ func TestModel_SelectVacation(t *testing.T) {
 // checkmarked too — this is not a single-selection menu.
 func TestModel_SetCurrentCustomStatus_MarksMatchingRowCurrent(t *testing.T) {
 	m := New()
-	m.SetCurrentCustomStatus("Working from home")
+	m.SetCurrentCustomStatus("Working from home", "🏠")
 	m.OpenWith("Workspace", "active", false, time.Time{})
 
 	labels := m.currentItemLabels()
@@ -112,16 +112,29 @@ func TestModel_ClearStatusOnlyVisibleWhenStatusSet(t *testing.T) {
 	}
 
 	m2 := New()
-	m2.SetCurrentCustomStatus("On vacation")
+	m2.SetCurrentCustomStatus("On vacation", "🌴")
 	m2.OpenWith("Workspace", "active", false, time.Time{})
 	if !m2.hasClearStatusItem() {
 		t.Error("Clear status should appear when a status is set")
 	}
 }
 
+// TestModel_ClearStatusVisibleForEmojiOnlyStatus pins a real bug found
+// in review: Slack allows a status with only an emoji, no text (set
+// from the real Slack client, say). Clear status must still appear so
+// the user has a way to remove it from slk.
+func TestModel_ClearStatusVisibleForEmojiOnlyStatus(t *testing.T) {
+	m := New()
+	m.SetCurrentCustomStatus("", "🎉")
+	m.OpenWith("Workspace", "active", false, time.Time{})
+	if !m.hasClearStatusItem() {
+		t.Error("Clear status should appear for an emoji-only status")
+	}
+}
+
 func TestModel_ClearStatusAction(t *testing.T) {
 	m := New()
-	m.SetCurrentCustomStatus("On vacation")
+	m.SetCurrentCustomStatus("On vacation", "🌴")
 	m.OpenWith("Workspace", "active", false, time.Time{})
 	m.HandleKey("c")
 	m.HandleKey("l")

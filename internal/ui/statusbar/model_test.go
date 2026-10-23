@@ -169,6 +169,19 @@ func TestStatusBar_CustomStatusSegment(t *testing.T) {
 	}
 }
 
+// TestStatusBar_CustomStatusSegment_EmojiOnly pins a real bug found in
+// review: Slack allows a status with only an emoji, no text (e.g. set
+// from the real Slack client). The segment must still show it, and
+// without a stray leading/trailing space from the empty text half.
+func TestStatusBar_CustomStatusSegment_EmojiOnly(t *testing.T) {
+	m := New()
+	m.SetCustomStatus("", "🎉")
+	out := stripANSI(m.View(120))
+	if !strings.Contains(out, "🎉") {
+		t.Errorf("expected emoji-only status to render, got: %q", out)
+	}
+}
+
 func TestStatusBar_NoCustomStatus_NoSegment(t *testing.T) {
 	m := New()
 	// Default state — no SetCustomStatus call.

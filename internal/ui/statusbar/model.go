@@ -272,12 +272,12 @@ func (m Model) View(width int) string {
 				Render(m.toast))
 	}
 
-	if m.statusText != "" {
+	if m.statusText != "" || m.statusEmoji != "" {
 		rightParts = append(rightParts,
 			lipgloss.NewStyle().
 				Foreground(styles.Accent).
 				Background(styles.SurfaceDark).
-				Render(m.statusEmoji+" "+m.statusText))
+				Render(strings.TrimSpace(m.statusEmoji+" "+m.statusText)))
 	}
 
 	// Presence + DND segment (hidden when presence is "" and not in DND)

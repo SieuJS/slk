@@ -52,11 +52,14 @@ type Model struct {
 	currentPres   string // "active" / "away" / ""
 	dndActive     bool
 
-	// currentStatusText is the profile status text currently applied
-	// (e.g. "Working from home"), set via SetCurrentCustomStatus before
-	// OpenWith so the matching preset row renders with a checkmark and
-	// the Clear-status row appears.
-	currentStatusText string
+	// currentStatusText/currentStatusEmoji are the profile status
+	// currently applied (e.g. "Working from home" / "🏠"), set via
+	// SetCurrentCustomStatus before OpenWith so the matching preset row
+	// renders with a checkmark and the Clear-status row appears. Slack
+	// allows an emoji-only status with no text, so Clear-status
+	// visibility must check both, not text alone.
+	currentStatusText  string
+	currentStatusEmoji string
 }
 
 var _ interface {
@@ -79,16 +82,17 @@ func (m *Model) OpenWith(workspaceName, presence string, dndEnabled bool, dndEnd
 	m.workspaceName = workspaceName
 	m.currentPres = presence
 	m.dndActive = dndEnabled && (dndEnd.IsZero() || time.Now().Before(dndEnd))
-	m.items = buildItems(presence, m.dndActive, m.currentStatusText)
+	m.items = buildItems(presence, m.dndActive, m.currentStatusText, m.currentStatusEmoji)
 	m.filter()
 }
 
-// SetCurrentCustomStatus records the profile status text currently
-// applied (from presenceController's cache), so the next OpenWith call
-// marks the matching preset row as current and shows the Clear-status
-// row. Call before OpenWith.
-func (m *Model) SetCurrentCustomStatus(text string) {
+// SetCurrentCustomStatus records the profile status currently applied
+// (from presenceController's cache), so the next OpenWith call marks
+// the matching preset row as current and shows the Clear-status row.
+// Call before OpenWith.
+func (m *Model) SetCurrentCustomStatus(text, emoji string) {
 	m.currentStatusText = text
+	m.currentStatusEmoji = emoji
 }
 
 // hasEndDNDItem reports whether the End-DND row is present. Exposed for tests.
@@ -132,7 +136,7 @@ func (m Model) currentItemLabels() []string {
 // width measurement and the terminal's actual cell width agree. Mixed
 // emoji width — particularly the moon — caused the modal's right
 // border to not draw correctly in some terminals.
-func buildItems(presence string, dndActive bool, statusText string) []item {
+func buildItems(presence string, dndActive bool, statusText, statusEmoji string) []item {
 	rows := []item{
 		{label: "Active", action: ActionSetActive, current: presence == "active" && !dndActive},
 		{label: "Away", action: ActionSetAway, current: presence == "away" && !dndActive},
@@ -147,7 +151,7 @@ func buildItems(presence string, dndActive bool, statusText string) []item {
 		{label: "Snooze until tomorrow morning", action: ActionSnooze, minutes: minutesUntilTomorrowMorning(time.Now())},
 		{label: "Snooze custom...", action: ActionCustomSnooze},
 	}
-	if statusText != "" {
+	if statusText != "" || statusEmoji != "" {
 		rows = append(rows, item{label: "Clear status", action: ActionClearStatus})
 	}
 	if dndActive {

@@ -304,7 +304,7 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 				// Re-open so the row-count/cursor state reflects the
 				// status just set (buildItems now has the Clear-status
 				// row too).
-				a.presenceMenu.SetCurrentCustomStatus("Working from home")
+				a.presenceMenu.SetCurrentCustomStatus("Working from home", "🏠")
 				pres, dndEnabled, dndEnd, _ := a.presence.Status("T1")
 				a.presenceMenu.OpenWith("ws", pres, dndEnabled, dndEnd)
 			},
@@ -329,7 +329,7 @@ func TestPresenceMenuModeKeys(t *testing.T) {
 				open(t, a)
 				_, _ = a.Update(UserStatusChangeMsg{UserID: "U1", Emoji: ":palm_tree:", Text: "On vacation"})
 				pres, dndEnabled, dndEnd, _ := a.presence.Status("T1")
-				a.presenceMenu.SetCurrentCustomStatus("On vacation")
+				a.presenceMenu.SetCurrentCustomStatus("On vacation", "🌴")
 				a.presenceMenu.OpenWith("ws", pres, dndEnabled, dndEnd)
 				if got := modalRows(&a.presenceMenu); got != presenceMenuAllRows+1 {
 					t.Fatalf("precondition: %d rows, want %d (Clear-status row missing)", got, presenceMenuAllRows+1)
